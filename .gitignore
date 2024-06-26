@@ -4,3 +4,4 @@ perf.data.old
 perf.data
 measurements.txt
 flamegraph.svg
+dhat-heap.json

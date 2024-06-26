@@ -6,6 +6,10 @@ use std::{
     fs::File,
 };
 
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 struct Measurement<'a> {
     name: &'a [u8],
     value: i32,
@@ -107,6 +111,9 @@ impl From<Acc> for Final {
 }
 
 fn main() {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     let file = File::open("./measurements.txt").expect("file opening failed");
     let mapped = unsafe { memmap2::MmapOptions::new().map(&file) }.expect("mapping failed");
 
@@ -114,32 +121,20 @@ fn main() {
         .par_split(|x| *x == b'\n')
         .filter(|x| !x.is_empty())
         .fold(
-            || -> HashMap<Vec<u8>, Acc> { HashMap::with_capacity(1000) },
-            |mut stats, line| {
-                let item = measurement(line);
-                if let Some(acc) = stats.get_mut(item.name) {
-                    acc.update(item.value);
-                } else {
-                    stats.insert(Vec::from(item.name), Acc::from(item.value));
-                }
-                stats
-            },
+            || -> HashMap<&[u8], Acc> { HashMap::with_capacity(1000) },
+            process_line,
         )
-        .reduce_with(|mut map1, map2| {
-            for (k, v) in map2 {
-                if let Some(acc) = map1.get_mut(&k) {
-                    *acc += v;
-                } else {
-                    map1.insert(k, v);
-                }
-            }
-            map1
-        })
+        .reduce_with(merge_dicts)
         .expect("no data");
 
     let mut results = stats
         .into_par_iter()
-        .map(|(k, v)| (unsafe { String::from_utf8_unchecked(k) }, Final::from(v)))
+        .map(|(k, v)| {
+            (
+                unsafe { String::from_utf8_unchecked(k.into()) },
+                Final::from(v),
+            )
+        })
         .collect::<Vec<(String, Final)>>();
     results.sort_by(|x, y| x.0.cmp(&y.0));
     println!(
@@ -150,4 +145,28 @@ fn main() {
             .collect::<Vec<String>>()
             .join(", ")
     );
+}
+
+fn process_line<'a>(mut stats: HashMap<&'a [u8], Acc>, line: &'a [u8]) -> HashMap<&'a [u8], Acc> {
+    let item = measurement(line);
+    if let Some(acc) = stats.get_mut(item.name) {
+        acc.update(item.value);
+    } else {
+        stats.insert(item.name, Acc::from(item.value));
+    }
+    stats
+}
+
+fn merge_dicts<'a>(
+    mut map1: HashMap<&'a [u8], Acc>,
+    map2: HashMap<&'a [u8], Acc>,
+) -> HashMap<&'a [u8], Acc> {
+    for (k, v) in map2 {
+        if let Some(acc) = map1.get_mut(&k) {
+            *acc += v;
+        } else {
+            map1.insert(k, v);
+        }
+    }
+    map1
 }
