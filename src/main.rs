@@ -1,17 +1,12 @@
-use std::{
-    collections::HashMap,
-    fmt::Display,
-    fs::File,
-    io::{BufRead, BufReader},
-};
+use std::{collections::HashMap, fmt::Display, fs::File};
 
 struct Measurement<'a> {
     name: &'a [u8],
-    value: f32,
+    value: i32,
 }
 
-impl<'a> From<(&'a [u8], f32)> for Measurement<'a> {
-    fn from(value: (&'a [u8], f32)) -> Self {
+impl<'a> From<(&'a [u8], i32)> for Measurement<'a> {
+    fn from(value: (&'a [u8], i32)) -> Self {
         Self {
             name: value.0,
             value: value.1,
@@ -27,23 +22,29 @@ fn measurement(input: &[u8]) -> Measurement {
     } else {
         6
     };
-    let value = unsafe { std::str::from_utf8_unchecked(&input[input.len() - offset + 1..]) }
-        .parse()
-        .expect("invalid float");
+    let mut value: i32 =
+        unsafe { std::str::from_utf8_unchecked(&input[input.len() - offset + 1..input.len() - 2]) }
+            .parse::<i32>()
+            .expect("invalid float")
+            * 100;
+    value += unsafe { std::str::from_utf8_unchecked(&input[input.len() - 1..]) }
+        .parse::<i32>()
+        .expect("decimal broken")
+        * if value > -0 { 1 } else { -1 };
     let name = &input[..input.len() - offset];
     Measurement { name, value }
 }
 
 #[derive(Debug)]
 struct Acc {
-    min: f32,
-    max: f32,
-    total: f32,
+    min: i32,
+    max: i32,
+    total: i32,
     count: usize,
 }
 
 impl Acc {
-    fn update(&mut self, item: f32) {
+    fn update(&mut self, item: i32) {
         if item > self.max {
             self.max = item;
         }
@@ -55,8 +56,8 @@ impl Acc {
     }
 }
 
-impl From<f32> for Acc {
-    fn from(value: f32) -> Self {
+impl From<i32> for Acc {
+    fn from(value: i32) -> Self {
         Self {
             min: value,
             max: value,
@@ -83,32 +84,29 @@ impl From<Acc> for Final {
     fn from(value: Acc) -> Self {
         #[allow(clippy::cast_precision_loss)]
         Self {
-            min: value.min,
-            max: value.max,
-            avg: value.total / value.count as f32,
+            min: value.min as f32 / 100.,
+            max: value.max as f32 / 100.,
+            avg: value.total as f32 / value.count as f32 / 100.,
         }
     }
 }
 
 fn main() {
-    let mut reader = BufReader::new(File::open("./measurements.txt").expect("file opening failed"));
+    let file = File::open("./measurements.txt").expect("file opening failed");
+    let mapped = unsafe { memmap2::MmapOptions::new().map(&file) }.expect("mapping failed");
     let mut stats: HashMap<Vec<u8>, Acc> = HashMap::with_capacity(1000);
-    let mut buff = Vec::with_capacity(120);
 
-    while reader
-        .read_until(b'\n', &mut buff)
-        .expect("file reading failed")
-        > 0
-    {
-        buff.pop();
-        let item = measurement(&buff);
-        if let Some(acc) = stats.get_mut(item.name) {
-            acc.update(item.value);
-        } else {
-            stats.insert(Vec::from(item.name), Acc::from(item.value));
-        }
-        buff = Vec::with_capacity(120);
-    }
+    mapped
+        .split(|x| *x == b'\n')
+        .filter(|x| !x.is_empty())
+        .for_each(|line| {
+            let item = measurement(line);
+            if let Some(acc) = stats.get_mut(item.name) {
+                acc.update(item.value);
+            } else {
+                stats.insert(Vec::from(item.name), Acc::from(item.value));
+            }
+        });
 
     let mut results = stats
         .into_iter()
