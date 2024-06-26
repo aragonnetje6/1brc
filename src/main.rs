@@ -2,9 +2,9 @@ use rayon::{
     iter::{IntoParallelIterator, ParallelIterator},
     slice::ParallelSlice,
 };
+use rustc_hash::{FxBuildHasher, FxHashMap};
 use std::{
     cmp::{max, min},
-    collections::HashMap,
     fmt::Display,
     fs::File,
 };
@@ -124,7 +124,9 @@ fn main() {
         .par_split(|x| *x == b'\n')
         .filter(|x| !x.is_empty())
         .fold(
-            || -> HashMap<&[u8], Acc> { HashMap::with_capacity(1000) },
+            || -> FxHashMap<&[u8], Acc> {
+                FxHashMap::with_capacity_and_hasher(1000, FxBuildHasher)
+            },
             process_line,
         )
         .reduce_with(merge_dicts)
@@ -150,7 +152,10 @@ fn main() {
     );
 }
 
-fn process_line<'a>(mut stats: HashMap<&'a [u8], Acc>, line: &'a [u8]) -> HashMap<&'a [u8], Acc> {
+fn process_line<'a>(
+    mut stats: FxHashMap<&'a [u8], Acc>,
+    line: &'a [u8],
+) -> FxHashMap<&'a [u8], Acc> {
     let item = measurement(line);
     if let Some(acc) = stats.get_mut(item.name) {
         acc.update(item.value);
@@ -161,9 +166,9 @@ fn process_line<'a>(mut stats: HashMap<&'a [u8], Acc>, line: &'a [u8]) -> HashMa
 }
 
 fn merge_dicts<'a>(
-    mut map1: HashMap<&'a [u8], Acc>,
-    map2: HashMap<&'a [u8], Acc>,
-) -> HashMap<&'a [u8], Acc> {
+    mut map1: FxHashMap<&'a [u8], Acc>,
+    map2: FxHashMap<&'a [u8], Acc>,
+) -> FxHashMap<&'a [u8], Acc> {
     for (k, v) in map2 {
         if let Some(acc) = map1.get_mut(&k) {
             *acc += v;

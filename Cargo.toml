@@ -7,6 +7,7 @@ edition = "2021"
 dhat = {version = "0.3.3", optional = true}
 memmap2 = "0.9.4"
 rayon = "1.10.0"
+rustc-hash = "2.0.0"
 
 [profile.release]
 debug = 1
