@@ -1,4 +1,10 @@
-use std::{collections::HashMap, fmt::Display, fs::File};
+use rayon::prelude::*;
+use std::{
+    cmp::{max, min},
+    collections::HashMap,
+    fmt::Display,
+    fs::File,
+};
 
 struct Measurement<'a> {
     name: &'a [u8],
@@ -67,6 +73,15 @@ impl From<i32> for Acc {
     }
 }
 
+impl std::ops::AddAssign for Acc {
+    fn add_assign(&mut self, rhs: Self) {
+        self.total += rhs.total;
+        self.count += rhs.count;
+        self.min = min(self.min, rhs.min);
+        self.max = max(self.max, rhs.max);
+    }
+}
+
 #[derive(Debug)]
 struct Final {
     min: f32,
@@ -94,29 +109,43 @@ impl From<Acc> for Final {
 fn main() {
     let file = File::open("./measurements.txt").expect("file opening failed");
     let mapped = unsafe { memmap2::MmapOptions::new().map(&file) }.expect("mapping failed");
-    let mut stats: HashMap<Vec<u8>, Acc> = HashMap::with_capacity(1000);
 
-    mapped
-        .split(|x| *x == b'\n')
+    let stats = mapped
+        .par_split(|x| *x == b'\n')
         .filter(|x| !x.is_empty())
-        .for_each(|line| {
-            let item = measurement(line);
-            if let Some(acc) = stats.get_mut(item.name) {
-                acc.update(item.value);
-            } else {
-                stats.insert(Vec::from(item.name), Acc::from(item.value));
+        .fold(
+            || -> HashMap<Vec<u8>, Acc> { HashMap::with_capacity(1000) },
+            |mut stats, line| {
+                let item = measurement(line);
+                if let Some(acc) = stats.get_mut(item.name) {
+                    acc.update(item.value);
+                } else {
+                    stats.insert(Vec::from(item.name), Acc::from(item.value));
+                }
+                stats
+            },
+        )
+        .reduce_with(|mut map1, map2| {
+            for (k, v) in map2 {
+                if let Some(acc) = map1.get_mut(&k) {
+                    *acc += v;
+                } else {
+                    map1.insert(k, v);
+                }
             }
-        });
+            map1
+        })
+        .expect("no data");
 
     let mut results = stats
-        .into_iter()
+        .into_par_iter()
         .map(|(k, v)| (unsafe { String::from_utf8_unchecked(k) }, Final::from(v)))
         .collect::<Vec<(String, Final)>>();
     results.sort_by(|x, y| x.0.cmp(&y.0));
     println!(
         "{{{}}}",
         results
-            .into_iter()
+            .into_par_iter()
             .map(|(name, value)| format!("{name}={value}"))
             .collect::<Vec<String>>()
             .join(", ")
