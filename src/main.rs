@@ -1,4 +1,7 @@
-use rayon::prelude::*;
+use rayon::{
+    iter::{IntoParallelIterator, ParallelIterator},
+    slice::ParallelSlice,
+};
 use std::{
     cmp::{max, min},
     collections::HashMap,
