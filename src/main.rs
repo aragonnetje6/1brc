@@ -5,13 +5,13 @@ use std::{
     io::{BufRead, BufReader},
 };
 
-struct Measurement {
-    name: String,
+struct Measurement<'a> {
+    name: &'a [u8],
     value: f32,
 }
 
-impl From<(String, f32)> for Measurement {
-    fn from(value: (String, f32)) -> Self {
+impl<'a> From<(&'a [u8], f32)> for Measurement<'a> {
+    fn from(value: (&'a [u8], f32)) -> Self {
         Self {
             name: value.0,
             value: value.1,
@@ -19,19 +19,19 @@ impl From<(String, f32)> for Measurement {
     }
 }
 
-fn measurement(mut input: String) -> Measurement {
-    let offset = if input[input.len() - 4..input.len() - 3] == *";" {
+fn measurement(input: &[u8]) -> Measurement {
+    let offset = if input[input.len() - 4..input.len() - 3] == *b";" {
         4
-    } else if input[input.len() - 5..input.len() - 4] == *";" {
+    } else if input[input.len() - 5..input.len() - 4] == *b";" {
         5
     } else {
         6
     };
-    let value = input[input.len() - offset + 1..]
+    let value = unsafe { std::str::from_utf8_unchecked(&input[input.len() - offset + 1..]) }
         .parse()
         .expect("invalid float");
-    input.truncate(input.len() - offset);
-    Measurement { name: input, value }
+    let name = &input[..input.len() - offset];
+    Measurement { name, value }
 }
 
 #[derive(Debug)]
@@ -92,7 +92,7 @@ impl From<Acc> for Final {
 
 fn main() {
     let mut reader = BufReader::new(File::open("./measurements.txt").expect("file opening failed"));
-    let mut stats: HashMap<String, Acc> = HashMap::with_capacity(1000);
+    let mut stats: HashMap<Vec<u8>, Acc> = HashMap::with_capacity(1000);
     let mut buff = Vec::with_capacity(120);
 
     while reader
@@ -101,18 +101,18 @@ fn main() {
         > 0
     {
         buff.pop();
-        let item = measurement(unsafe { String::from_utf8_unchecked(buff) });
-        if let Some(acc) = stats.get_mut(&item.name) {
+        let item = measurement(&buff);
+        if let Some(acc) = stats.get_mut(item.name) {
             acc.update(item.value);
         } else {
-            stats.insert(item.name, Acc::from(item.value));
+            stats.insert(Vec::from(item.name), Acc::from(item.value));
         }
         buff = Vec::with_capacity(120);
     }
 
     let mut results = stats
         .into_iter()
-        .map(|(k, v)| (k, Final::from(v)))
+        .map(|(k, v)| (unsafe { String::from_utf8_unchecked(k) }, Final::from(v)))
         .collect::<Vec<(String, Final)>>();
     results.sort_by(|x, y| x.0.cmp(&y.0));
     println!(
